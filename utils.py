@@ -2,14 +2,31 @@ import tensorflow as tf
 import numpy as np
 
 # Flatten gradient along all variables
-def flatgrad(loss, vrbs):
+def FLAT_GRAD(loss, vrbs):
 	# tf.gradients returns list of gradients w.r.t variables
 	'''
 		If 'loss' argument is list, tf.gradients returns sum of gradient of each loss element for each variables
 		tf.gradients([y,z]) => [dy/dx+dz/dx]
 	'''
 	grads = tf.gradients(loss, vrbs)
-	return tf.concat(0, [tf.reshape(g, (np.prod(v.get_shape().as_list()))) for (g, v) in zip(grads, vrbs)])
+	# Returns gradient of each variable element
+	# Each gradient has same shape with variable
+	return tf.concat(0, [tf.reshape(g, [np.prod(v.get_shape().as_list()),]) for (g, v) in zip(grads, vrbs)])
+
+# y -> Hy
+def HESSIAN_VECTOR_PRODUCT(func, vrbs, y):
+	first_derivative = tf.gradients(func, vrbs)
+	flat_y = list()
+	start = 0
+	for var in vrbs:
+		variable_size = np.prod(var.get_shape().as_list())
+		param = tf.reshape(y[start:(start+variable_size)], var.get_shape())
+		flat_y.append(param)
+		start += variable_size
+	# First derivative * y
+	gradient_with_y = [tf.reduce_sum(f_d, f_y) for (f_d, f_y) in zip(first_derivative, flat_y)]
+	HVP = FLAT_GRAD(gradient_with_y, vrbs)
+	return HVP 
 
 
 # mu1, logstd1 : [batch size, action size]
@@ -20,6 +37,7 @@ def LOG_POLICY(mu, logstd, action):
 	# Take log to gaussian formula
 	log_prob = tf.square(action - mu) / (2*variance) - 0.5*tf.log(2*np.pi) - logstd
 	# Make [batch size, ] sum along 'action size' axis
+	# Doing sum becuase it is log scale => actually it is product of probability of each action index
 	return tf.reduce_sum(log_prob, 1)
 
 
@@ -34,7 +52,7 @@ def GAUSS_KL(mu1, logstd1, mu2, logstd2):
 	variance1 = tf.exp(2*logstd1)
 	variance2 = tf.exp(2*logstd2)
 
-	kl = logstd2 - logstd1 + (variance1 + tf.square(mu1 - mu2))/(2*variance2)) - 0.5
+	kl = logstd2 - logstd1 + (variance1 + tf.square(mu1 - mu2))/(2*variance2) - 0.5
 	return tf.reduce_sum(kl)
 	
 '''
@@ -101,6 +119,31 @@ def LINE_SEARCH(surr, theta_prev, full_step, num_backtracking=10):
 	return theta_prev
 			
 
+def LINEAR(x, hidden, name=None):
+	with tf.variable_scope(name or 'L'):
+		weight = tf.get_variable('Weight', [x.get_shape()[-1], hidden], initializer=tf.truncated_normal_initializer(stddev=0.02))
+		bias = tf.get_variable('Bias', [hidden,], initializer=tf.constant_initializer(0))
+		weighted_sum = tf.matmul(x, weight) + bias
+	return weighted_sum
+
+
+'''
+	'x' should be array has shape of [batch size,]
+	Ex ) x = [x1,x2,x3,x4...]
+	Return : [x1+df*x2+(df**2)*x3..., x2+df*x3+(df**2)*x4....., ...]
+'''
+def DISCOUNT_SUM(x, discount_factor):
+	size = x.shape[0]
+	discount_sum = np.zeros((size,))
+	# x[::-1] is reverse of x
+	for idx, value in enumerate(x[::-1]):
+		discount_sum[:size-idx] += value
+		if size-idx-1 == 0:
+			break
+		discount_sum[:size-idx-1] *= discount_factor
+
+	return discount_sum
+
 
 # Get actual value
 class GetValue:
@@ -134,8 +177,16 @@ class SetValue:
 		self.sess.run(self.op_list, feed_dict={self.var_list:var})
 
 
-
-
+if __name__ == "__main__":
+#	a = np.array([1,2,3])
+#	b = DISCOUNT_SUM(a, 0.5)
+#	print(b.shape)
+#	print(b)
+	x = tf.Variable(np.random.randn(3,4))
+	y = tf.Variable(np.random.randn(3,5))
+	f = tf.pow(x, 2) + 2*y + tf.pow(y, 2) + 4*x
+	r = COMPUTE_HESSIAN(f, [x,y])
+	print(r)
 
 
 

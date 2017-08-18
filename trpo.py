@@ -34,7 +34,7 @@ class TRPO():
 			Mean value for each action : each action has gaussian distribution with mean and standard deviation
 			With continuous state and action space, use GAUSSIAN DISTRIBUTION, maps  from the input features to the mean of Gaussian distribution for each action
 			Sperate set of parameters specifies the log standard deviation of each action
-			=> The policy ius defined by the normnal distribution (mean=NeuralNet(states), stddev= exp(r))
+			=> The policy is defined by the normnal distribution (mean=NeuralNet(states), stddev= exp(r))
 		'''
 		self.action_dist_mu, action_dist_logstd = self.build_policy(self.obs)
 		# Make log standard shape from [1, action size] => [batch size, action size]
@@ -60,7 +60,8 @@ class TRPO():
 		ent = GAUSS_ENTROPY(self.action_dist_mu, self.action_dist_logstd) / self.args.batch_size
 
 		self.losses = [surr_single_state, kl, ent]
-		tr_vrbs = tf.trainable_variables()
+		#tr_vrbs = tf.trainable_variables()
+		tr_vrbs = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='Policy')
 		for i in len(tr_vrbs):
 			print(i.op.name)
 
@@ -70,7 +71,7 @@ class TRPO():
 				Quadratic approximation to KL divergence constraint
 		'''
 		# Maximize surrogate function over policy parameter 'theta'
-		self.pg = flatgrad(surr_single_state, tr_vrbs)
+		self.pg = FLAT_GRAD(surr_single_state, tr_vrbs)
 		# KL divergence where first argument is fixed
 		# First argument would be old policy parameters, so keep it constant
 		kl_first_fixed = GAUSS_KL_FIRST_FIX(self.action_dist_mu, self.action_dist_logstd) / self.args.batch_size
@@ -91,28 +92,27 @@ class TRPO():
 		'''
 		gradient_w_tangent = [tf.reduce_sum(kl_g*t) for (kl_g, t) in zip(first_kl_grads, tangent)]
 		'''
-			Get derivative of KL_prime*y : [dKL/dx1, dKL/dx2...]
-			Returns : [d2KL/dx1dx1+d2KL/dx1dx2..., d2KL/dx1dx2+d2KL/dx2dx2..., ...]
-			So get second derivative of KL divergence * y for each variable => y->JMJy
-			Use it at computing fisher vector product	
+			From derivative of KL_prime*y : [dKL/dx1, dKL/dx2...]*y
+				y -> Ay, A is n by n matrix but hard to implement(numerically solving (n*n)*(n*1))
+				so first multiply target 'y' to gradient and take derivation
+		    'self.FVP'	Returns : [d2KL/dx1dx1+d2KL/dx1dx2..., d2KL/dx1dx2+d2KL/dx2dx2..., ...]*y
+			So get (second derivative of KL divergence)*y for each variable => y->JMJy (Fisher Vector Product)
 		'''
-		self.fim = flatgrad(gradient_w_tangent, tr_vrbs)
+		self.FVP = FLAT_GRAD(gradient_w_tangent, tr_vrbs)
 		# Get actual paramenter value
 		self.get_value = GetValue(self.sess, tr_vrbs)
 		# To set parameter values
 		self.set_value = SetValue(self.sess, tr_vrbs)
-
+		# GAE
+		self.gae = GAE(self.sess, self.observation_size, self.args.gamma, self.args.lamda)
 	
-		self.sess.run(tf.global_variable_initializer())		
+		self.sess.run(tf.global_variables_initializer())		
 
 
 	def train(self):
 		batch_path = self.rollout()
-
-		for each_path in batch_path:
-			# Value function to calculate advantage
-			each_path["Baseline"]
-
+		# Get advantage from gae
+		advantage_estimated = self.gae.get_advantage(batch_path)
 
 		# Put all paths in batch in a numpy array to feed to network as [batch size, action/observation size]
 		# Those batches come from old policy before update theta 
@@ -121,12 +121,12 @@ class TRPO():
 		observation = np.squeeze(np.concatenate([each_path["Observation"] for each_path in batch_path])
 		action = np.squeeze(np.concatenate([each_path["Action"] for each_path in batch_path])
 		
-		feed_dict = {self.obs : , self.action : , self.advantage : , self.old_action_dist_mu : , self.old_action_dist_logstd : }
+		feed_dict = {self.obs : observation , self.action : action, self.advantage : advantage_estimated, self.old_action_dist_mu : action_dist_mu, self.old_action_dist_logstd : action_dist_logstd}
 
 		# Computing fisher vector product : FIM * (policy gradient), y->Ay=JMJy
 		def fisher_vector_product(gradient):
-			feed_dict[self.fim] = gradient
-			return self.sess.run(self.fim, feed_dict=feed_dict)
+			feed_dict[self.FVP] = gradient
+			return self.sess.run(self.FVP, feed_dict=feed_dict)
 
 		policy_g = self.sess.run(self.pg, feed_dict=feed_dict)
 		'''
@@ -162,11 +162,11 @@ class TRPO():
 	# Make policy network given states
 	def build_policy(self, states, name='Policy'):
 		with tf.variable_scope(name):
-			h1 = linear(states, self.args.hidden_size, name='h1')
+			h1 = LINEAR(states, self.args.hidden_size, name='h1')
 			h1_nl = tf.nn.relu(h1)
-			h2 = linear(h1_nl, self.args.hidden_size, name='h2')
+			h2 = LINEAR(h1_nl, self.args.hidden_size, name='h2')
 			h2_nl = tf.nn.relu(h2)
-			h3 = linear(h2_nl, self.action_size, name='h3')
+			h3 = LINEAR(h2_nl, self.action_size, name='h3')
 			# tf.initializer has to be either Tensor object or 'callable' that takes two arguments (shape, dtype)
 			init = lambda shape, dtype : 0.01*np.random.randn(*shape).astype(dtype)
 			# [1, action size] since it has to be constant through batch axis, log standard deviation
@@ -193,7 +193,7 @@ class TRPO():
 		self.num_epi = 0
 		while timesteps < self.args.timesteps_per_batch:
 			self.num_epi += 1
-			obs, action, rewards, action_dist_mu, action_dist_logstd = [], [], [], [], []
+			obs, action, rewards, done, action_dist_mu, action_dist_logstd = [], [], [], [], [], []
 			prev_obs = self.env.reset()
 			for _ in xrange(self.args.max_path_length):
 				# Make 'batch size' axis
@@ -207,17 +207,19 @@ class TRPO():
 				action_dist_mu.append(action_dist_mu_)
 				action_dist_logstd.append(action_dist_logstd_)
 				# Take action 
-				next_obs, reward_, done, _ = self.env.step(action_)
+				next_obs, reward_, done_, _ = self.env.step(action_)
+				done.append(done_)
 				rewards.append(reward_)
 				prev_obs = next_obs
 				if done:
 					# Make dictionary about path, make each element has shape of [None, observation size/action size]
-					path = {"Observation":np.concatenate(obs)
-							"Action":np.concatenate(action)
-							"Action_mu":np.concatenate(action_dist_mu)
-							"Action_logstd":np.concatenate(action_dist_logstd)
+					path = {"Observation":np.concatenate(obs),
+							"Action":np.concatenate(action),
+							"Action_mu":np.concatenate(action_dist_mu),
+							"Action_logstd":np.concatenate(action_dist_logstd),
 							# [length,]
-							"Reward":np.asarray(rewards)
+							"Done":np.asarray(done),
+							"Reward":np.asarray(rewards)}
 					paths.append(path)
 					print('Path finish')
 					break
