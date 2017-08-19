@@ -3,6 +3,7 @@ import tensorflow as tf
 import time, os
 from utils import *
 from ops import *
+from gae import GAE
 
 
 class TRPO():
@@ -53,11 +54,13 @@ class TRPO():
 			Contribution of a single s_n : Expectation over a~q[(new policy / q(is)) * advantace_old]
 			sampling distribution q is normally old policy
 		'''
+		batch_size = self.obs.get_shape().as_list()[0]
+		print('Batch size %d' % batch_size)
 		policy_ratio = tf.exp(self.log_policy - self.log_old_policy)
 		surr_single_state = tf.reduce_mean(policy_ratio * self.advantage)
 		# Average KL divergence and shannon entropy 
-		kl = GAUSS_KL(self.old_action_dist_mu, self.old_action_dist_logstd, self.action_dist_mu, self.action_dist_logstd) / self.args.batch_size
-		ent = GAUSS_ENTROPY(self.action_dist_mu, self.action_dist_logstd) / self.args.batch_size
+		kl = GAUSS_KL(self.old_action_dist_mu, self.old_action_dist_logstd, self.action_dist_mu, self.action_dist_logstd) / batch_size
+		ent = GAUSS_ENTROPY(self.action_dist_mu, self.action_dist_logstd) / batch_size
 
 		self.losses = [surr_single_state, kl, ent]
 		#tr_vrbs = tf.trainable_variables()
@@ -74,7 +77,7 @@ class TRPO():
 		self.pg = FLAT_GRAD(surr_single_state, tr_vrbs)
 		# KL divergence where first argument is fixed
 		# First argument would be old policy parameters, so keep it constant
-		kl_first_fixed = GAUSS_KL_FIRST_FIX(self.action_dist_mu, self.action_dist_logstd) / self.args.batch_size
+		kl_first_fixed = GAUSS_KL_FIRST_FIX(self.action_dist_mu, self.action_dist_logstd) / batch_size
 		# Gradient of KL divergence
 		first_kl_grads = tf.gradients(kl_first_fixed, tr_vrbs)
 		# Vectors we are going to multiply
@@ -104,7 +107,7 @@ class TRPO():
 		# To set parameter values
 		self.set_value = SetValue(self.sess, tr_vrbs)
 		# GAE
-		self.gae = GAE(self.sess, self.observation_size, self.args.gamma, self.args.lamda)
+		self.gae = GAE(self.sess, self.observation_size, self.args.gamma, self.args.lamda, self.args.vf_constraint)
 	
 		self.sess.run(tf.global_variables_initializer())		
 
@@ -125,7 +128,7 @@ class TRPO():
 
 		# Computing fisher vector product : FIM * (policy gradient), y->Ay=JMJy
 		def fisher_vector_product(gradient):
-			feed_dict[self.FVP] = gradient
+			feed_dict[self.flat_tangent] = gradient
 			return self.sess.run(self.FVP, feed_dict=feed_dict)
 
 		policy_g = self.sess.run(self.pg, feed_dict=feed_dict)
@@ -144,6 +147,7 @@ class TRPO():
 		kl_approximated = 0.5*search_direction.dot(fisher_vector_product(search_direction))
 		# beta
 		maximal_step_length = np.sqrt(self.args.kl_constraint / kl_approximated)
+		# beta*s
 		full_step = maximal_step_length * search_direction
 
 		def surrogate(theta):
@@ -154,9 +158,21 @@ class TRPO():
 		# Last, we use a line search to ensure improvement of the surrogate objective and sttisfaction of the KL constraint by manually control valud of parameter
 		# Start with the maximal step length and exponentially shrink until objective improves
 		new_theta = LINE_SEARCH(surrogate, theta_prev, full_step, self.args.num_backtracking)
-		# Update theta	
+		# Update policy parameter theta	
 		self.set_value(new_theta)
 
+		# Update value function parameter
+		# Policy update is perfomed using the old value function parameter	
+		self.gae.train()
+
+		# After update, store values at log
+		surrogate_after, kl_after, _ = self.sess.run(self.losses, feed_dict=feed_dict)	
+		logs = {"Surrogate loss":surrogate_after, "KL_DIV":kl_after}
+		logs["Total Step"] = sum([len(path["Reward"]) for path in batch_path])
+		logs["Num episode"] = len([path["Reward"] for path in batch_path])
+		logs["Total Sum"] = sum([sum(path["Reward"]) for path in batch_path])
+		logs["Average sum"] = logs["Total Sum"] / logs["Total Step"]
+		return logs
 
 
 	# Make policy network given states
@@ -227,6 +243,5 @@ class TRPO():
 		print('%d episodes is collected for batch' % self.num_epi)
 		return paths
 		
-
 
 
