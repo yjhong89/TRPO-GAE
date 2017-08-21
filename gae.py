@@ -15,7 +15,7 @@ class GAE():
 	# Input will be state : [batch size, observation size]
 	# And outputs state value function
 	def build_model(self):
-		print('Initializinig Value function network')
+		print('Initializing Value function network')
 		with tf.variable_scope('VF'):
 			self.x = tf.placeholder(tf.float32, [None, self.input_size], name='State')
 			# Target 'y' to calculate loss
@@ -27,10 +27,10 @@ class GAE():
 			h2_nl = tf.tanh(h2)
 			h3 = LINEAR(h2_nl, 25, name='h3')
 			h3_nl = tf.tanh(h3)
-			self.value = LINEAR(h3_nl, 1, name='h3')
+			self.value = LINEAR(h3_nl, 1, name='FC')
 
 		tr_vrbs = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='VF')
-		for i in len(tr_vrbs):
+		for i in tr_vrbs:
 			print(i.op.name)
 
 		self.loss = tf.reduce_mean(tf.pow(self.target - self.value, 2))
@@ -41,8 +41,8 @@ class GAE():
 		# Note that H is the Hessian of the objective, different with paper where use H as Gauss-Newton approximation to Hessian
 		self.HVP = HESSIAN_VECTOR_PRODUCT(self.loss, tr_vrbs, self.y)
 		# To adjust weights and bias
-		self.get_value = GetValue(self.sess, tr_vrbs)
-		self.set_value = SetValue(self.sess, tr_vrbs)
+		self.get_value = GetValue(self.sess, tr_vrbs, name='VF')
+		self.set_value = SetValue(self.sess, tr_vrbs, name='VF')
 
 		self.sess.run(tf.global_variables_initializer())
 
@@ -57,22 +57,22 @@ class GAE():
 		self.observation = np.squeeze(np.concatenate([path["Observation"] for path in paths]))
 		self.return_sum = np.concatenate([path["return_sum"] for path in paths])
 		self.rewards = np.concatenate([path["Reward"] for path in paths])
-		self.done = np.concatenate([path["Dond"] for path in paths])
+		self.done = np.concatenate([path["Done"] for path in paths])
 		# Get batch size
-		batch_s = tf.shape(self.x)[0]
+		batch_s = self.observation.shape[0] 
 		# Compute delta_t_V for all timesteps using current parameter
 		feed_dict = {self.x:self.observation, self.target:self.return_sum}
-		# [batch size,]
+		# [batch size, 1]
 		self.value_s = self.sess.run(self.value, feed_dict=feed_dict)
+		# Squeeze to [batch size, ]
+		self.value_s = np.resize(self.value_s, (batch_s,))
 		# If current state is before game done, set value as 0 
 		self.value_next_s = np.zeros((batch_s,))
 		self.value_next_s[:batch_s-1] = self.value_s[1:]
 		self.value_next_s *= (1 - self.done)
-		
 		# delta_t_V : reward_t + gamma*Value(state_t+1) - Value(state_t) 
-		# [batch size, ] (for all timestep in data)
 		self.delta_v = self.rewards + self.gamma*self.value_next_s - self.value_s
-		
+		# [batch size, ] (for all timestep in data)
 		# Compute advantage estimator for all timesteps
 		GAE = DISCOUNT_SUM(self.delta_v, self.gamma*self.lamda)	
 		return GAE
@@ -84,6 +84,7 @@ class GAE():
 	'''
 	def train(self):
 		print('Training Value function network')
+		parameter_prev = self.get_value()
 		feed_dict = {self.x:self.observation, self.target:self.return_sum}
 		gradient_objective = self.sess.run(self.grad_objective, feed_dict=feed_dict)
 		
@@ -93,7 +94,7 @@ class GAE():
 			return self.sess.run(self.HVP, feed_dict=feed_dict)
 
 		# '-' term added because objective function aims to minimize : s = -H(-1)*y
-		step_direction = CONJUGATE_GRADIENT(get_hesian_vector_product, -y)
+		step_direction = CONJUGATE_GRADIENT(get_hessian_vector_product, -gradient_objective)
 		# Analogous to TRPO train part
 		constraint_approx = 0.5*step_direction.dot(get_hessian_vector_product(step_direction))
 		maximal_step_length = np.sqrt(self.vf_constraint / constraint_approx)
@@ -103,21 +104,7 @@ class GAE():
 			self.set_value(parameter)
 			return self.sess.run(self.loss, feed_dict=feed_dict)
 
-		parameter_prev = self.get_value()
 		new_parameter = LINE_SEARCH(loss, parameter_prev, full_step)
-		self.set_value(new_theta)
-
-
-
-
-
-
-
-	
-
-
-
-
-
+		self.set_value(new_parameter, update_info=1)
 
 

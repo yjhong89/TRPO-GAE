@@ -10,8 +10,8 @@ class LEARNER():
 		self.sess = sess
 
 		self.env = gym.make(self.args.env_name)
-		self.args.max_path_length = self.env.timestep_limit
-		self.agent = TRPO(self.args, self.env, self.sess):
+		self.args.max_path_length = self.env.spec.timestep_limit
+		self.agent = TRPO(self.args, self.env, self.sess)
 		self.saver = tf.train.Saver()
 		
 	def learn(self):
@@ -25,10 +25,10 @@ class LEARNER():
 			total_steps += train_log["Total Step"]
 			total_episode += train_log["Num episode"]
 			self.write_logs(train_index, total_episode, total_steps, start_time, train_log)
-			if np.mod(self.args.save_interval, train_index) == 0:
+			if np.mod(train_index, self.args.save_interval) == 0:
 				self.save(total_steps)
 
-			if total_steps > self.args.total_train_steps:
+			if total_steps > self.args.total_train_step:
 				break 
 			
 
@@ -37,11 +37,11 @@ class LEARNER():
 		log_path = os.path.join(self.args.log_dir, self.model_dir+'.csv')
 		if not os.path.exists(log_path):
 			log_file = open(log_path, 'w')
-			log_file.write("Train step\t," + "Surrogate\t," + "KL divergence\t," + "Number of steps trained\t," + "Number of episodes trained\t," + "Average reward\t," + "Elapsed time")
+			log_file.write("Train step\t," + "Surrogate\t," + "KL divergence\t," + "Number of steps trained\t," + "Number of episodes trained\t," + "Average reward\t," + "Elapsed time\n")
 		else:
 			log_file = open(log_path, 'a')
-		print("Train step %d => Surrogate loss : %3.3f, KL div : %3.3f, Number of Episode/steps trained : %d/%d, Average reward : %3.3f, Time : %3.3f" % (train_index, log_info["Surrogate loss"], log_info["KL_DIV"], total_episode, total_steps, log_info["Average sum"], time.time()-start_time))
-		log_file.write(str(train_index) + '\t,' + str(log_info["Surrogate loss"]) + '\t,' + str(log_info["KL_DIV"]) + '\t,' + str(total_steps) + '\t,' + str(total_episode) + '\t,' + str(log_info["Average sum"]) + '\t,' + str(time.time()-start_time))
+		print("Train step %d => Surrogate loss : %3.3f, KL div : %3.8f, Number of Episode/steps trained : %d/%d, Average reward : %3.3f, Time : %3.3f" % (train_index, log_info["Surrogate loss"], log_info["KL_DIV"], total_episode, total_steps, log_info["Average sum"], time.time()-start_time))
+		log_file.write(str(train_index) + '\t,' + str(log_info["Surrogate loss"]) + '\t,' + str(log_info["KL_DIV"]) + '\t,' + str(total_steps) + '\t,' + str(total_episode) + '\t,' + str(log_info["Average sum"]) + '\t,' + str(time.time()-start_time)+'\n')
 		log_file.flush()
 
 

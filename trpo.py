@@ -2,7 +2,6 @@ import numpy as np
 import tensorflow as tf
 import time, os
 from utils import *
-from ops import *
 from gae import GAE
 
 
@@ -16,10 +15,10 @@ class TRPO():
 		self.action_space = self.env.action_space
 		print('Observation space', self.observation_space)
 		print('Action space', self.action_space)
-		#
-		self.observation_size = self.env.observation.shape[0]
+		# 'Box' observation_space and 'Box' action_space
+		self.observation_size = self.env.observation_space.shape[0]
 		# np.prod : return the product of array element over a given axis
-		self.action_size = np.prod(self.action_space.shape)
+		self.action_size = self.action_space.shape[0]
 
 		# Build model and create variables
 		self.build_model()
@@ -40,7 +39,8 @@ class TRPO():
 		self.action_dist_mu, action_dist_logstd = self.build_policy(self.obs)
 		# Make log standard shape from [1, action size] => [batch size, action size]
 		# tf.tile(A, reps) : construct an tensor by repeating A given by 'reps'
-		self.action_dist_logstd = tf.tile(action_dist_logstd, [self.action_dist_mu.get_shape()[0], 1])
+		# Use tf.shape instead of tf.get_shape() when 'None' used in placeholder
+		self.action_dist_logstd = tf.tile(action_dist_logstd, (tf.shape(action_dist_logstd)[0], 1))
 
 		# outputs probability of taking 'self.action'
 		# new distribution	
@@ -54,10 +54,12 @@ class TRPO():
 			Contribution of a single s_n : Expectation over a~q[(new policy / q(is)) * advantace_old]
 			sampling distribution q is normally old policy
 		'''
-		batch_size = self.obs.get_shape().as_list()[0]
-		print('Batch size %d' % batch_size)
+		batch_size = tf.shape(self.obs)[0]
+#		print('Batch size %d' % batch_size)
 		policy_ratio = tf.exp(self.log_policy - self.log_old_policy)
-		surr_single_state = tf.reduce_mean(policy_ratio * self.advantage)
+		surr_single_state = -tf.reduce_mean(policy_ratio * self.advantage)
+		# tf.shape returns dtype=int32, tensor conversion requested dtype float32
+		batch_size = tf.cast(batch_size, tf.float32)
 		# Average KL divergence and shannon entropy 
 		kl = GAUSS_KL(self.old_action_dist_mu, self.old_action_dist_logstd, self.action_dist_mu, self.action_dist_logstd) / batch_size
 		ent = GAUSS_ENTROPY(self.action_dist_mu, self.action_dist_logstd) / batch_size
@@ -65,7 +67,7 @@ class TRPO():
 		self.losses = [surr_single_state, kl, ent]
 		#tr_vrbs = tf.trainable_variables()
 		tr_vrbs = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='Policy')
-		for i in len(tr_vrbs):
+		for i in tr_vrbs:
 			print(i.op.name)
 
 		'''
@@ -103,9 +105,9 @@ class TRPO():
 		'''
 		self.FVP = FLAT_GRAD(gradient_w_tangent, tr_vrbs)
 		# Get actual paramenter value
-		self.get_value = GetValue(self.sess, tr_vrbs)
+		self.get_value = GetValue(self.sess, tr_vrbs, name='Policy')
 		# To set parameter values
-		self.set_value = SetValue(self.sess, tr_vrbs)
+		self.set_value = SetValue(self.sess, tr_vrbs, name='Policy')
 		# GAE
 		self.gae = GAE(self.sess, self.observation_size, self.args.gamma, self.args.lamda, self.args.vf_constraint)
 	
@@ -114,15 +116,16 @@ class TRPO():
 
 	def train(self):
 		batch_path = self.rollout()
+		theta_prev = self.get_value()
 		# Get advantage from gae
 		advantage_estimated = self.gae.get_advantage(batch_path)
 
 		# Put all paths in batch in a numpy array to feed to network as [batch size, action/observation size]
 		# Those batches come from old policy before update theta 
-		action_dist_mu = np.squeeze(np.concatenate([each_path["Action_mu"] for each_path in batch_path])
-		action_dist_logstd = np.squeeze(np.concatenate([each_path["Action_logstd"] for each_path in batch_path])
-		observation = np.squeeze(np.concatenate([each_path["Observation"] for each_path in batch_path])
-		action = np.squeeze(np.concatenate([each_path["Action"] for each_path in batch_path])
+		action_dist_mu = np.squeeze(np.concatenate([each_path["Action_mu"] for each_path in batch_path]))
+		action_dist_logstd = np.squeeze(np.concatenate([each_path["Action_logstd"] for each_path in batch_path]))
+		observation = np.squeeze(np.concatenate([each_path["Observation"] for each_path in batch_path]))
+		action = np.squeeze(np.concatenate([each_path["Action"] for each_path in batch_path]))
 		
 		feed_dict = {self.obs : observation , self.action : action, self.advantage : advantage_estimated, self.old_action_dist_mu : action_dist_mu, self.old_action_dist_logstd : action_dist_logstd}
 
@@ -139,7 +142,7 @@ class TRPO():
 		'''
 		# Solve Ax = g, where A is FIM and g is gradient of policy network parameter
 		# Compute a search direction(delta) by conjugate gradient algorithm
-		search_direction = CONJUGATE_GRADIENT(fisher_vector_product, policy_g)
+		search_direction = CONJUGATE_GRADIENT(fisher_vector_product, -policy_g)
 
 		# KL divergence approximated by 1/2*(delta_transpose)*FIM*(delta)
 		# FIM*(delta) can be computed by fisher_vector_product
@@ -154,12 +157,11 @@ class TRPO():
 			self.set_value(theta)
 			return self.sess.run(self.losses[0], feed_dict=feed_dict)
 
-		theta_prev = self.get_value()
 		# Last, we use a line search to ensure improvement of the surrogate objective and sttisfaction of the KL constraint by manually control valud of parameter
 		# Start with the maximal step length and exponentially shrink until objective improves
 		new_theta = LINE_SEARCH(surrogate, theta_prev, full_step, self.args.num_backtracking)
 		# Update policy parameter theta	
-		self.set_value(new_theta)
+		self.set_value(new_theta, update_info=1)
 
 		# Update value function parameter
 		# Policy update is perfomed using the old value function parameter	
@@ -177,6 +179,7 @@ class TRPO():
 
 	# Make policy network given states
 	def build_policy(self, states, name='Policy'):
+		print('Initializing Policy network')
 		with tf.variable_scope(name):
 			h1 = LINEAR(states, self.args.hidden_size, name='h1')
 			h1_nl = tf.nn.relu(h1)
@@ -184,20 +187,20 @@ class TRPO():
 			h2_nl = tf.nn.relu(h2)
 			h3 = LINEAR(h2_nl, self.action_size, name='h3')
 			# tf.initializer has to be either Tensor object or 'callable' that takes two arguments (shape, dtype)
-			init = lambda shape, dtype : 0.01*np.random.randn(*shape).astype(dtype)
+			init = lambda shape, dtype, partition_info=None : 0.01*np.random.randn(*shape)
 			# [1, action size] since it has to be constant through batch axis, log standard deviation
-			action_dist_logstd = tf.get_variable('logstd', initializer=init, shape=[1, self.action_size], dtype=tf.float32)
+			action_dist_logstd = tf.get_variable('logstd', initializer=init, shape=[1, self.action_size])
 		
 		return h3, action_dist_logstd
 		
 	def act(self, obs):
 		# Need to expand first dimension(batch axis), make [1, observation size]
 		obs_expanded = np.expand_dims(obs, 0)
-		action_dist_mu, action_dist_logstd = self.sess.run([self.action_dist_mu, self.action_dist_logstd], feed_dict={self.obs:obs})
+		action_dist_mu, action_dist_logstd = self.sess.run([self.action_dist_mu, self.action_dist_logstd], feed_dict={self.obs:obs_expanded})
 		# Sample from gaussian distribution
 		action = np.random.normal(loc=action_dist_mu, scale=np.exp(action_dist_logstd))
 		# All shape would be [1, action size]
-		print(action)
+#		print(action)
 		return action, action_dist_mu, action_dist_logstd
 
 	def rollout(self):
@@ -207,8 +210,10 @@ class TRPO():
 		paths = list()
 		timesteps = 0
 		self.num_epi = 0
+		print('Timesteps for batch : %d' % self.args.timesteps_per_batch)
 		while timesteps < self.args.timesteps_per_batch:
 			self.num_epi += 1
+#			print('%d episode starts' % self.num_epi)
 			obs, action, rewards, done, action_dist_mu, action_dist_logstd = [], [], [], [], [], []
 			prev_obs = self.env.reset()
 			for _ in xrange(self.args.max_path_length):
@@ -226,8 +231,9 @@ class TRPO():
 				next_obs, reward_, done_, _ = self.env.step(action_)
 				done.append(done_)
 				rewards.append(reward_)
+#				print(prev_obs, action_, reward_, next_obs, done_)
 				prev_obs = next_obs
-				if done:
+				if done_:
 					# Make dictionary about path, make each element has shape of [None, observation size/action size]
 					path = {"Observation":np.concatenate(obs),
 							"Action":np.concatenate(action),
@@ -237,10 +243,11 @@ class TRPO():
 							"Done":np.asarray(done),
 							"Reward":np.asarray(rewards)}
 					paths.append(path)
-					print('Path finish')
+#					print('%d episode finish' % self.num_epi)
 					break
 			timesteps += len(rewards)
-		print('%d episodes is collected for batch' % self.num_epi)
+#			print('%d steps collected for batch' % timesteps)
+		print('%d episodes, %d steps is collected for batch' % (self.num_epi, timesteps))
 		return paths
 		
 

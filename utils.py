@@ -24,7 +24,7 @@ def HESSIAN_VECTOR_PRODUCT(func, vrbs, y):
 		flat_y.append(param)
 		start += variable_size
 	# First derivative * y
-	gradient_with_y = [tf.reduce_sum(f_d, f_y) for (f_d, f_y) in zip(first_derivative, flat_y)]
+	gradient_with_y = [tf.reduce_sum(f_d * f_y) for (f_d, f_y) in zip(first_derivative, flat_y)]
 	HVP = FLAT_GRAD(gradient_with_y, vrbs)
 	return HVP 
 
@@ -68,15 +68,15 @@ def GAUSS_ENTROPY(mu, logstd):
 def GAUSS_KL_FIRST_FIX(mu, logstd):
 	# First argument is old policy, so keep it unchanged through tf.stop_gradient 
 	mu1, logstd1 = map(tf.stop_gradient, [mu, logstd])
-	mu1, logstd2 = mu, logstd
+	mu2, logstd2 = mu, logstd
 	return GAUSS_KL(mu1, logstd1, mu2, logstd2)
 
 '''
 	Conjugate gradient : used to calculate search direction
 	Find basis which satisfies <u,v>=u.transpose*Q*v = 0(Q-orthogonal and hessian of objective function)
-	Numerical solving Qx=b, Here Q is FIM => solving Ax=-g
+	Numerical solving Qx=b, Here Q is FIM => solving Ax=g
 '''
-def CONJUGATE_GRADIENT(fvp, y, k=10, tolerance=1e-8):
+def CONJUGATE_GRADIENT(fvp, y, k=10, tolerance=1e-6):
 	# Given intial guess, r0 := y-fvp(x0), but our initial value is x0 := 0 so r0 := y
 	p = y.copy()
 	r = y.copy()	
@@ -95,7 +95,7 @@ def CONJUGATE_GRADIENT(fvp, y, k=10, tolerance=1e-8):
 		beta_k = new_r_transpose_r / r_transpose_r
 		# p_k+1 := r_k+1 + beta_k*p_k
 		p = r + beta_k*p
-		r_transpose_r = new_r_tranpose_r
+		r_transpose_r = new_r_transpose_r
 		if r_transpose_r < tolerance:
 			break
 	return x
@@ -105,15 +105,16 @@ def CONJUGATE_GRADIENT(fvp, y, k=10, tolerance=1e-8):
 def LINE_SEARCH(surr, theta_prev, full_step, num_backtracking=10):
 	prev_sur_objective = surr(theta_prev)
 	# backtracking :1,1/2,1/4,1/8...
-	for num_bt, fraction in enumerate(0.5**np.arange(num_backtraking)):
+	for num_bt, fraction in enumerate(0.5**np.arange(num_backtracking)):
 		# Exponentially shrink beta
 		step_frac = full_step*fraction
 		# theta -> theta + step
 		theta_new = theta_prev + step_frac
 		new_sur_objective = surr(theta_new)
-		sur_improvement = new_sur_objective - prev_sur_objective
+		# '-' surrogate loss should be minimized
+		sur_improvement = prev_sur_objective - new_sur_objective
 		if sur_improvement > 0:
-			print('Objective improved')
+			print('Objective improved from %3.4f to %3.4f' % (prev_sur_objective, new_sur_objective))
 			return theta_new
 	print('Objective not improved')	
 	return theta_prev
@@ -132,8 +133,10 @@ def LINEAR(x, hidden, name=None):
 	Ex ) x = [x1,x2,x3,x4...]
 	Return : [x1+df*x2+(df**2)*x3..., x2+df*x3+(df**2)*x4....., ...]
 '''
-def DISCOUNT_SUM(x, discount_factor):
+def DISCOUNT_SUM(x, discount_factor, print_info=None):
 	size = x.shape[0]
+	if print_info is not None:
+		print('Input shape', size, 'Discount_factor', discount_factor)
 	discount_sum = np.zeros((size,))
 	# x[::-1] is reverse of x
 	for idx, value in enumerate(x[::-1]):
@@ -147,33 +150,38 @@ def DISCOUNT_SUM(x, discount_factor):
 
 # Get actual value
 class GetValue:
-	def __init__(self, sess, variable_list):
+	def __init__(self, sess, variable_list, name=None):
+		self.name = name
 		self.sess = sess
-		self.op_list = [tf.reshape(v, (np.prod(v.get_shape().as_list()))) for v in variable_list]
+		self.op_list = tf.concat(0, [tf.reshape(v, [np.prod(v.get_shape().as_list())]) for v in variable_list])
 
 	# Use class instance as function
 	def __call__(self):
+		print('Getting %s parameter value' % self.name)
 		return self.op_list.eval(session=self.sess)
 
 # Set parameter value
 class SetValue:
-	def __init__(self, sess, variable_list):
+	def __init__(self, sess, variable_list, name=None):
+		self.name = name
 		self.sess = sess
 		shape_list = list()
 		for i in variable_list:
 			shape_list.append(i.get_shape().as_list())
 		total_variable_size = np.sum(np.prod(shapes) for shapes in shape_list)
-		self.var_list = tf.placeholder(tf.float32, [total_variable_size])
+		self.var_list = var_list = tf.placeholder(tf.float32, [total_variable_size])
 		start = 0
 		assign_ops = list()
 		for (shape, var) in zip(shape_list, variable_list):
 			variable_size = np.prod(shape)
-			assign_ops.append(tf.assign(var, tf.reshape(self.var_list[start:(start+variable_size)], shape)))
-			start += size
+			assign_ops.append(tf.assign(var, tf.reshape(var_list[start:(start+variable_size)], shape)))
+			start += variable_size
 		# Need '*' to represenet list
 		self.op_list = tf.group(*assign_ops)
 			
-	def __call__(self, var):
+	def __call__(self, var, update_info=0):
+		if update_info:
+			print('Update %s parameter' % self.name)
 		self.sess.run(self.op_list, feed_dict={self.var_list:var})
 
 
