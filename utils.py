@@ -74,6 +74,7 @@ def GAUSS_KL_FIRST_FIX(mu, logstd):
 '''
 	Conjugate gradient : used to calculate search direction
 	Find basis which satisfies <u,v>=u.transpose*Q*v = 0(Q-orthogonal and hessian of objective function)
+	Assumed that Q is symmetry and positive semidefinite matrix(Like hessian)
 	Numerical solving Qx=b, Here Q is FIM => solving Ax=g
 '''
 def CONJUGATE_GRADIENT(fvp, y, k=10, tolerance=1e-6):
