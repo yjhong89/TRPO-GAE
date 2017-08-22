@@ -35,7 +35,7 @@ def LOG_POLICY(mu, logstd, action):
 	# variance : exponential(2*log(std))
 	variance = tf.exp(2*logstd)
 	# Take log to gaussian formula
-	log_prob = tf.square(action - mu) / (2*variance) - 0.5*tf.log(2*np.pi) - logstd
+	log_prob = -tf.square(action - mu) / (2*variance) - 0.5*tf.log(2*np.pi) - logstd
 	# Make [batch size, ] sum along 'action size' axis
 	# Doing sum becuase it is log scale => actually it is product of probability of each action index
 	return tf.reduce_sum(log_prob, 1)
@@ -169,6 +169,7 @@ class SetValue:
 		for i in variable_list:
 			shape_list.append(i.get_shape().as_list())
 		total_variable_size = np.sum(np.prod(shapes) for shapes in shape_list)
+		print('Total variable size : %d' % total_variable_size)
 		self.var_list = var_list = tf.placeholder(tf.float32, [total_variable_size])
 		start = 0
 		assign_ops = list()

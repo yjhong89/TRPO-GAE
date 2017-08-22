@@ -32,16 +32,15 @@ class LEARNER():
 				break 
 			
 
-
 	def write_logs(self, train_index, total_episode, total_steps, start_time, log_info):
 		log_path = os.path.join(self.args.log_dir, self.model_dir+'.csv')
 		if not os.path.exists(log_path):
 			log_file = open(log_path, 'w')
-			log_file.write("Train step\t," + "Surrogate\t," + "KL divergence\t," + "Number of steps trained\t," + "Number of episodes trained\t," + "Average reward\t," + "Elapsed time\n")
+			log_file.write("Train step\t," + "Surrogate\t," + "KL divergence\t," + "Number of steps trained\t," + "Number of episodes trained\t," + "Episode.Avg.reward\t," + "Elapsed time\n")
 		else:
 			log_file = open(log_path, 'a')
-		print("Train step %d => Surrogate loss : %3.3f, KL div : %3.8f, Number of Episode/steps trained : %d/%d, Average reward : %3.3f, Time : %3.3f" % (train_index, log_info["Surrogate loss"], log_info["KL_DIV"], total_episode, total_steps, log_info["Average sum"], time.time()-start_time))
-		log_file.write(str(train_index) + '\t,' + str(log_info["Surrogate loss"]) + '\t,' + str(log_info["KL_DIV"]) + '\t,' + str(total_steps) + '\t,' + str(total_episode) + '\t,' + str(log_info["Average sum"]) + '\t,' + str(time.time()-start_time)+'\n')
+		print("Train step %d => Surrogate loss : %3.3f, KL div : %3.8f, Number of Episode/steps trained : %d/%d, Episode.Avg.reward : %3.3f, Time : %3.3f" % (train_index, log_info["Surrogate loss"], log_info["KL_DIV"], total_episode, total_steps, log_info["Episode Avg.reward"], time.time()-start_time))
+		log_file.write(str(train_index) + '\t,' + str(log_info["Surrogate loss"]) + '\t,' + str(log_info["KL_DIV"]) + '\t,' + str(total_steps) + '\t,' + str(total_episode) + '\t,' + str(log_info["Episode Avg.reward"]) + '\t,' + str(time.time()-start_time)+'\n')
 		log_file.flush()
 
 

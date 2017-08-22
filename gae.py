@@ -19,7 +19,7 @@ class GAE():
 		with tf.variable_scope('VF'):
 			self.x = tf.placeholder(tf.float32, [None, self.input_size], name='State')
 			# Target 'y' to calculate loss
-			self.target = tf.placeholder(tf.float32, [None], name='Target')
+			self.target = tf.placeholder(tf.float32, [None,1], name='Target')
 			# Model is MLP composed of 3 hidden layer with 100, 50, 25 tanh units
 			h1 = LINEAR(self.x, 100, name='h1')
 			h1_nl = tf.tanh(h1)
@@ -35,7 +35,7 @@ class GAE():
 
 		self.loss = tf.reduce_mean(tf.pow(self.target - self.value, 2))
 		# Get gradient of objective
-		self.grad_objective = FLAT_GRAD(self.value, tr_vrbs)
+		self.grad_objective = FLAT_GRAD(self.loss, tr_vrbs)
 		# Things to be matrix-vector product calculated
 		self.y = tf.placeholder(tf.float32, [None])
 		# Note that H is the Hessian of the objective, different with paper where use H as Gauss-Newton approximation to Hessian
@@ -60,6 +60,7 @@ class GAE():
 		self.done = np.concatenate([path["Done"] for path in paths])
 		# Get batch size
 		batch_s = self.observation.shape[0] 
+		self.return_sum = np.resize(self.return_sum, [batch_s, 1])
 		# Compute delta_t_V for all timesteps using current parameter
 		feed_dict = {self.x:self.observation, self.target:self.return_sum}
 		# [batch size, 1]

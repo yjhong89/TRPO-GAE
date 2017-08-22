@@ -17,7 +17,7 @@ def main():
 	parser.add_argument('--monitor', type=str2bool, default='n')
 	parser.add_argument('--timesteps_per_batch', type=int, default=1e4)	
 	parser.add_argument('--vf_constraint', type=float, default=1e-3)
-	parser.add_argument('--save_interval', type=int, default=100)
+	parser.add_argument('--save_interval', type=int, default=20)
 	parser.add_argument('--total_train_step', type=int, default=5e6)
 	parser.add_argument('--log_dir', type=str, default='./logs')
 	parser.add_argument('--checkpoint_dir', type=str, default='./checkpoint')

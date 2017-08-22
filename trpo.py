@@ -60,7 +60,7 @@ class TRPO():
 		surr_single_state = -tf.reduce_mean(policy_ratio * self.advantage)
 		# tf.shape returns dtype=int32, tensor conversion requested dtype float32
 		batch_size = tf.cast(batch_size, tf.float32)
-		# Average KL divergence and shannon entropy 
+		# Average KL divergence and shannon entropy, averaged over a set of inputs to function mu 
 		kl = GAUSS_KL(self.old_action_dist_mu, self.old_action_dist_logstd, self.action_dist_mu, self.action_dist_logstd) / batch_size
 		ent = GAUSS_ENTROPY(self.action_dist_mu, self.action_dist_logstd) / batch_size
 
@@ -173,7 +173,7 @@ class TRPO():
 		logs["Total Step"] = sum([len(path["Reward"]) for path in batch_path])
 		logs["Num episode"] = len([path["Reward"] for path in batch_path])
 		logs["Total Sum"] = sum([sum(path["Reward"]) for path in batch_path])
-		logs["Average sum"] = logs["Total Sum"] / logs["Total Step"]
+		logs["Episode Avg.reward"] = logs["Total Sum"] / logs["Num episode"]
 		return logs
 
 
