@@ -102,7 +102,7 @@ def CONJUGATE_GRADIENT(fvp, y, k=10, tolerance=1e-6):
 
 
 
-def LINE_SEARCH(surr, theta_prev, full_step, num_backtracking=10):
+def LINE_SEARCH(surr, theta_prev, full_step, num_backtracking=10, name=None):
 	prev_sur_objective = surr(theta_prev)
 	# backtracking :1,1/2,1/4,1/8...
 	for num_bt, fraction in enumerate(0.5**np.arange(num_backtracking)):
@@ -114,7 +114,7 @@ def LINE_SEARCH(surr, theta_prev, full_step, num_backtracking=10):
 		# '-' surrogate loss should be minimized
 		sur_improvement = prev_sur_objective - new_sur_objective
 		if sur_improvement > 0:
-			print('Objective improved from %3.4f to %3.4f' % (prev_sur_objective, new_sur_objective))
+			print('%s improved from %3.4f to %3.4f' % (name, prev_sur_objective, new_sur_objective))
 			return theta_new
 	print('Objective not improved')	
 	return theta_prev

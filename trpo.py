@@ -159,7 +159,7 @@ class TRPO():
 
 		# Last, we use a line search to ensure improvement of the surrogate objective and sttisfaction of the KL constraint by manually control valud of parameter
 		# Start with the maximal step length and exponentially shrink until objective improves
-		new_theta = LINE_SEARCH(surrogate, theta_prev, full_step, self.args.num_backtracking)
+		new_theta = LINE_SEARCH(surrogate, theta_prev, full_step, self.args.num_backtracking, name='Surrogate loss')
 		# Update policy parameter theta	
 		self.set_value(new_theta, update_info=1)
 

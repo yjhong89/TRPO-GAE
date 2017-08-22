@@ -105,7 +105,7 @@ class GAE():
 			self.set_value(parameter)
 			return self.sess.run(self.loss, feed_dict=feed_dict)
 
-		new_parameter = LINE_SEARCH(loss, parameter_prev, full_step)
+		new_parameter = LINE_SEARCH(loss, parameter_prev, full_step, name='Value loss')
 		self.set_value(new_parameter, update_info=1)
 
 
