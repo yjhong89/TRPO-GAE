@@ -26,7 +26,7 @@ class LEARNER():
 			total_episode += train_log["Num episode"]
 			self.write_logs(train_index, total_episode, total_steps, start_time, train_log)
 			if np.mod(train_index, self.args.save_interval) == 0:
-				self.save(total_steps)
+				self.save(total_index)
 
 			if total_steps > self.args.total_train_step:
 				break 
