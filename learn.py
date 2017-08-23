@@ -54,6 +54,6 @@ class LEARNER():
 
 	@property
 	def model_dir(self):
-		return '{}'.format(self.args.env_name)
+		return '{}_{}lambda'.format(self.args.env_name, self.args.lamda)
 
 
