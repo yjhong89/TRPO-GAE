@@ -210,13 +210,12 @@ class TRPO():
 		paths = list()
 		timesteps = 0
 		self.num_epi = 0
-		print('Timesteps for batch : %d' % self.args.timesteps_per_batch)
 		while timesteps < self.args.timesteps_per_batch:
 			self.num_epi += 1
 #			print('%d episode starts' % self.num_epi)
 			obs, action, rewards, done, action_dist_mu, action_dist_logstd = [], [], [], [], [], []
 			prev_obs = self.env.reset()
-			for _ in xrange(self.args.max_path_length):
+			for i in xrange(self.args.max_path_length):
 				# Make 'batch size' axis
 				prev_obs_expanded = np.expand_dims(prev_obs, 0)
 				# Agent take actions and receives sampled action and action distribution parameters
@@ -243,7 +242,7 @@ class TRPO():
 							"Done":np.asarray(done),
 							"Reward":np.asarray(rewards)}
 					paths.append(path)
-#					print('%d episode finish' % self.num_epi)
+#					print('%d episode finish at %d steps' % (self.num_epi, i+1))
 					break
 			timesteps += len(rewards)
 #			print('%d steps collected for batch' % timesteps)

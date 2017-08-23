@@ -75,7 +75,9 @@ class GAE():
 		self.delta_v = self.rewards + self.gamma*self.value_next_s - self.value_s
 		# [batch size, ] (for all timestep in data)
 		# Compute advantage estimator for all timesteps
-		GAE = DISCOUNT_SUM(self.delta_v, self.gamma*self.lamda)	
+		GAE = DISCOUNT_SUM(self.delta_v, self.gamma*self.lamda)
+		# Normalize to make mean 0
+		GAE = (GAE - np.mean(GAE)) / (np.std(GAE) + 1e-6)
 		return GAE
 
 	'''
